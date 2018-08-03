@@ -135,6 +135,11 @@ int main(int argc, char* argv[]) {
 	int * pResults = NULL;
 	if (!cap.isOpened())  // check if we succeeded
 		return -1;
+	ImageData gallery_img_data_color(gallery_img_color.cols, gallery_img_color.rows, gallery_img_color.channels());
+	gallery_img_data_color.data = gallery_img_color.data;
+
+	ImageData gallery_img_data_gray(gallery_img_gray.cols, gallery_img_gray.rows, gallery_img_gray.channels());
+	gallery_img_data_gray.data = gallery_img_gray.data;
 	for (;;)
 	{
 		cv::Mat frame;
@@ -163,7 +168,6 @@ int main(int argc, char* argv[]) {
 			image_roi = frame(region_of_interest);
 			imshow("image_roi", image_roi);
 			printf("face_rect=[%d, %d, %d, %d], neighbors=%d, angle=%d\n", x, y, w, h, neighbors, angle);
-			cv::rectangle(result_multiview_reinforce, cv::Rect(x, y, w, h), cv::Scalar(0, 255, 0), 2);
 			if (doLandmark)
 			{
 				for (int j = 0; j < 68; j++)
@@ -174,11 +178,6 @@ int main(int argc, char* argv[]) {
 			cv::Mat probe_img_color = image_roi.clone();
 			cv::Mat probe_img_gray;
 			cv::cvtColor(probe_img_color, probe_img_gray, CV_BGR2GRAY);
-			ImageData gallery_img_data_color(gallery_img_color.cols, gallery_img_color.rows, gallery_img_color.channels());
-			gallery_img_data_color.data = gallery_img_color.data;
-
-			ImageData gallery_img_data_gray(gallery_img_gray.cols, gallery_img_gray.rows, gallery_img_gray.channels());
-			gallery_img_data_gray.data = gallery_img_gray.data;
 
 			ImageData probe_img_data_color(probe_img_color.cols, probe_img_color.rows, probe_img_color.channels());
 			probe_img_data_color.data = probe_img_color.data;
@@ -225,12 +224,10 @@ int main(int argc, char* argv[]) {
 			// Caculate similarity of two faces
 			float sim = face_recognizer.CalcSimilarity(gallery_fea, probe_fea);
 			std::cout << sim << endl;
+			if (sim>0.7)
+				cv::rectangle(result_multiview_reinforce, cv::Rect(x, y, w, h), cv::Scalar(255, 0, 0), 2);
+
 			//-------------------------------------------//
-
-
-
-
-
 
 		}
 		//imshow("Results_frontal", result_frontal);
@@ -238,14 +235,6 @@ int main(int argc, char* argv[]) {
 		if (cv::waitKey(30) >= 0) break;
 
 	}
-
-
-
-
-
-
-
-	
 	system("pause");
 	return 0;
 }
