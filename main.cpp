@@ -75,8 +75,17 @@ using namespace std;
 #include <string>
 #include <iostream>
 #include <algorithm>
+#include<opencv2\opencv.hpp>
+#include <stdio.h>
+#include "facedetect-dll.h"
+
+//#pragma comment(lib,"libfacedetect.lib")
+#pragma comment(lib,"libfacedetect-x64.lib")
+//define the buffer size. Do not change the size!
+#define DETECT_BUFFER_SIZE 0x20000
 
 using namespace seeta;
+
 
 #define TEST(major, minor) major##_##minor##_Tester()
 #define EXPECT_NE(a, b) if ((a) == (b)) std::cout << "ERROR: "
@@ -107,68 +116,136 @@ int main(int argc, char* argv[]) {
 	std::string test_dir = DATA_DIR + "test_face_recognizer/";
 
 	//load image
-	cv::Mat gallery_img_color = cv::imread("C:/Users/Gene/Documents/Federer.jpg", 1);
+	cv::Mat gallery_img_color = cv::imread("C:/Users/Gene/Documents/Edmond.jpg", 1);
 	cv::Mat gallery_img_gray;
 	cv::cvtColor(gallery_img_color, gallery_img_gray, CV_BGR2GRAY);
 
-	cv::Mat probe_img_color = cv::imread("C:/Users/Gene/Documents/Federer2.jpg", 1);
-	cv::Mat probe_img_gray;
-	cv::cvtColor(probe_img_color, probe_img_gray, CV_BGR2GRAY);
+	
+//-----------------------------------------------//
+	cv::VideoCapture cap(0); // open the default camera
 
-	ImageData gallery_img_data_color(gallery_img_color.cols, gallery_img_color.rows, gallery_img_color.channels());
-	gallery_img_data_color.data = gallery_img_color.data;
-
-	ImageData gallery_img_data_gray(gallery_img_gray.cols, gallery_img_gray.rows, gallery_img_gray.channels());
-	gallery_img_data_gray.data = gallery_img_gray.data;
-
-	ImageData probe_img_data_color(probe_img_color.cols, probe_img_color.rows, probe_img_color.channels());
-	probe_img_data_color.data = probe_img_color.data;
-
-	ImageData probe_img_data_gray(probe_img_gray.cols, probe_img_gray.rows, probe_img_gray.channels());
-	probe_img_data_gray.data = probe_img_gray.data;
-
-	// Detect faces
-	std::vector<seeta::FaceInfo> gallery_faces = detector.Detect(gallery_img_data_gray);
-	int32_t gallery_face_num = static_cast<int32_t>(gallery_faces.size());
-
-	std::vector<seeta::FaceInfo> probe_faces = detector.Detect(probe_img_data_gray);
-	int32_t probe_face_num = static_cast<int32_t>(probe_faces.size());
-
-	if (gallery_face_num == 0 || probe_face_num == 0)
+	unsigned char * pBuffer = (unsigned char *)malloc(DETECT_BUFFER_SIZE);
+	if (!pBuffer)
 	{
-		std::cout << "Faces are not detected.";
-		return 0;
+		fprintf(stderr, "Can not alloc buffer.\n");
+		return -1;
 	}
 
-	// Detect 5 facial landmarks
-	seeta::FacialLandmark gallery_points[5];
-	point_detector.PointDetectLandmarks(gallery_img_data_gray, gallery_faces[0], gallery_points);
-
-	seeta::FacialLandmark probe_points[5];
-	point_detector.PointDetectLandmarks(probe_img_data_gray, probe_faces[0], probe_points);
-
-	for (int i = 0; i<5; i++)
+	bool doLandmark = true;
+	int * pResults = NULL;
+	if (!cap.isOpened())  // check if we succeeded
+		return -1;
+	for (;;)
 	{
-		cv::circle(gallery_img_color, cv::Point(gallery_points[i].x, gallery_points[i].y), 2,
-			 cv::Scalar(0, 255, 0));
-		cv::circle(probe_img_color, cv::Point(probe_points[i].x, probe_points[i].y), 2,
-			 cv::Scalar(0, 255, 0));
+		cv::Mat frame;
+		cap >> frame; // get a new frame from camera
+		cv::Mat gray;
+		cvtColor(frame, gray, CV_BGR2GRAY);
+		imshow("edges", frame);
+
+		pResults = facedetect_multiview_reinforce(pBuffer, (unsigned char*)(gray.ptr(0)), gray.cols, gray.rows, (int)gray.step,
+			1.2f, 3, 48, 0, doLandmark);
+
+		printf("%d faces detected.\n", (pResults ? *pResults : 0));
+		cv::Mat result_multiview_reinforce = frame.clone();;
+		cv::Mat image_roi;
+		//print the detection results
+		for (int i = 0; i < (pResults ? *pResults : 0); i++)
+		{
+			short * p = ((short*)(pResults + 1)) + 142 * i;
+			int x = p[0];
+			int y = p[1];
+			int w = p[2];
+			int h = p[3];
+			int neighbors = p[4];
+			int angle = p[5];
+			cv::Rect region_of_interest = cv::Rect(x, y, w, h);
+			image_roi = frame(region_of_interest);
+			imshow("image_roi", image_roi);
+			printf("face_rect=[%d, %d, %d, %d], neighbors=%d, angle=%d\n", x, y, w, h, neighbors, angle);
+			cv::rectangle(result_multiview_reinforce, cv::Rect(x, y, w, h), cv::Scalar(0, 255, 0), 2);
+			if (doLandmark)
+			{
+				for (int j = 0; j < 68; j++)
+					circle(result_multiview_reinforce, cv::Point((int)p[6 + 2 * j], (int)p[6 + 2 * j + 1]), 1, cv::Scalar(0, 255, 0));
+			}
+
+			//-------------------------------------------------------------------------------------------------//
+			cv::Mat probe_img_color = image_roi.clone();
+			cv::Mat probe_img_gray;
+			cv::cvtColor(probe_img_color, probe_img_gray, CV_BGR2GRAY);
+			ImageData gallery_img_data_color(gallery_img_color.cols, gallery_img_color.rows, gallery_img_color.channels());
+			gallery_img_data_color.data = gallery_img_color.data;
+
+			ImageData gallery_img_data_gray(gallery_img_gray.cols, gallery_img_gray.rows, gallery_img_gray.channels());
+			gallery_img_data_gray.data = gallery_img_gray.data;
+
+			ImageData probe_img_data_color(probe_img_color.cols, probe_img_color.rows, probe_img_color.channels());
+			probe_img_data_color.data = probe_img_color.data;
+
+			ImageData probe_img_data_gray(probe_img_gray.cols, probe_img_gray.rows, probe_img_gray.channels());
+			probe_img_data_gray.data = probe_img_gray.data;
+
+			// Detect faces
+			std::vector<seeta::FaceInfo> gallery_faces = detector.Detect(gallery_img_data_gray);
+			int32_t gallery_face_num = static_cast<int32_t>(gallery_faces.size());
+
+			std::vector<seeta::FaceInfo> probe_faces = detector.Detect(probe_img_data_gray);
+			int32_t probe_face_num = static_cast<int32_t>(probe_faces.size());
+
+			if (gallery_face_num == 0 || probe_face_num == 0)
+			{
+				std::cout << "Faces are not detected.";
+				return 0;
+			}
+
+			// Detect 5 facial landmarks
+			seeta::FacialLandmark gallery_points[5];
+			point_detector.PointDetectLandmarks(gallery_img_data_gray, gallery_faces[0], gallery_points);
+
+			seeta::FacialLandmark probe_points[5];
+			point_detector.PointDetectLandmarks(probe_img_data_gray, probe_faces[0], probe_points);
+
+			for (int i = 0; i<5; i++)
+			{
+				cv::circle(gallery_img_color, cv::Point(gallery_points[i].x, gallery_points[i].y), 2,
+					cv::Scalar(0, 255, 0));
+				cv::circle(probe_img_color, cv::Point(probe_points[i].x, probe_points[i].y), 2,
+					cv::Scalar(0, 255, 0));
+			}
+			//cv::imwrite("gallery_point_result.jpg", gallery_img_color);
+			//cv::imwrite("probe_point_result.jpg", probe_img_color);
+
+			// Extract face identity feature
+			float gallery_fea[2048];
+			float probe_fea[2048];
+			face_recognizer.ExtractFeatureWithCrop(gallery_img_data_color, gallery_points, gallery_fea);
+			face_recognizer.ExtractFeatureWithCrop(probe_img_data_color, probe_points, probe_fea);
+
+			// Caculate similarity of two faces
+			float sim = face_recognizer.CalcSimilarity(gallery_fea, probe_fea);
+			std::cout << sim << endl;
+			//-------------------------------------------//
+
+
+
+
+
+
+		}
+		//imshow("Results_frontal", result_frontal);
+		imshow("Results_multiview", result_multiview_reinforce);
+		if (cv::waitKey(30) >= 0) break;
+
 	}
-	cv::imwrite("gallery_point_result.jpg", gallery_img_color);
-	cv::imwrite("probe_point_result.jpg", probe_img_color);
 
-	// Extract face identity feature
-	float gallery_fea[2048];
-	float probe_fea[2048];
-	face_recognizer.ExtractFeatureWithCrop(gallery_img_data_color, gallery_points, gallery_fea);
-	face_recognizer.ExtractFeatureWithCrop(probe_img_data_color, probe_points, probe_fea);
 
-	// Caculate similarity of two faces
-	float sim = face_recognizer.CalcSimilarity(gallery_fea, probe_fea);
-	std::cout << sim << endl;
 
+
+
+
+
+	
 	system("pause");
 	return 0;
 }
-
-
